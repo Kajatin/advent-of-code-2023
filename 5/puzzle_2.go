@@ -76,126 +76,107 @@ func main() {
 	}
 
 	mapped_seed_ranges := almanac.Seeds
-	counter := 0
 	for _, map_type := range maps {
 		curr_map := almanac.Maps[map_type]
 		new_mapped_seed_ranges := []AlmanacSeed{}
-		processed_mapped_seed_ranges := []AlmanacSeed{}
+		seed_ranges_to_be_mapped := []AlmanacSeed{}
 
-		// fmt.Println("mapped: ", mapped_seed_ranges)
+		for _, seed_range := range mapped_seed_ranges {
+			seed_range_splits := []AlmanacSeed{}
 
-		for _, map_item := range curr_map {
-			for _, seed_range := range mapped_seed_ranges {
-				if seed_range.SeedStart < map_item.SourceRangeStart || seed_range.SeedStart >= map_item.SourceRangeStart + map_item.RangeLength {
+			for _, map_item := range curr_map {
+				overlapping_start := max(seed_range.SeedStart, map_item.SourceRangeStart)
+				overlapping_range := min(seed_range.SeedStart + seed_range.SeedRange, map_item.SourceRangeStart + map_item.RangeLength) - max(seed_range.SeedStart, map_item.SourceRangeStart)
+
+				if overlapping_range <= 0 {
 					continue
 				}
 
-				range_length := min(seed_range.SeedRange, map_item.SourceRangeStart + map_item.RangeLength - seed_range.SeedStart)
-				offset := map_item.DestinationRangeStart - map_item.SourceRangeStart
-				new_mapped_seed_ranges = append(new_mapped_seed_ranges, AlmanacSeed{
-					SeedStart: seed_range.SeedStart + offset,
-					SeedRange: range_length,
-				})
-				processed_mapped_seed_ranges = append(processed_mapped_seed_ranges, AlmanacSeed{
-					SeedStart: seed_range.SeedStart,
-					SeedRange: range_length,
+				seed_range_splits = append(seed_range_splits, AlmanacSeed{
+					SeedStart: overlapping_start,
+					SeedRange: overlapping_range,
 				})
 
-				// fmt.Println(map_item, seed_range, AlmanacSeed{
-				// 	SeedStart: seed_range.SeedStart + offset,
-				// 	SeedRange: range_length,
-				// })
+				if overlapping_start == seed_range.SeedStart && overlapping_range == seed_range.SeedRange {
+					break
+				}
 			}
+
+			// The original seed range might not be mapped completely, let's add
+			// the missing splits to the list of seed ranges to be mapped.
+			if len(seed_range_splits) == 0 {
+				seed_range_splits = append(seed_range_splits, seed_range)
+			} else {
+				// Sort the seed range splits.
+				for i := 0; i < len(seed_range_splits); i++ {
+					for j := i + 1; j < len(seed_range_splits); j++ {
+						if seed_range_splits[i].SeedStart > seed_range_splits[j].SeedStart {
+							seed_range_splits[i], seed_range_splits[j] = seed_range_splits[j], seed_range_splits[i]
+						}
+					}
+				}
+
+
+				// Add the missing splits to seed_range_splits.
+				// start
+				missing_seed_range_splits := []AlmanacSeed{}
+				if seed_range_splits[0].SeedStart > seed_range.SeedStart {
+					missing_seed_range_splits = append(missing_seed_range_splits, AlmanacSeed{
+						SeedStart: seed_range.SeedStart,
+						SeedRange: seed_range_splits[0].SeedStart - seed_range.SeedStart,
+					})
+				}
+
+				// end
+				if seed_range_splits[len(seed_range_splits) - 1].SeedStart + seed_range_splits[len(seed_range_splits) - 1].SeedRange < seed_range.SeedStart + seed_range.SeedRange {
+					missing_seed_range_splits = append(missing_seed_range_splits, AlmanacSeed{
+						SeedStart: seed_range_splits[len(seed_range_splits) - 1].SeedStart + seed_range_splits[len(seed_range_splits) - 1].SeedRange,
+						SeedRange: seed_range.SeedStart + seed_range.SeedRange - (seed_range_splits[len(seed_range_splits) - 1].SeedStart + seed_range_splits[len(seed_range_splits) - 1].SeedRange),
+					})
+				}
+
+				// Add the missing splits in between the already existing splits.
+				for i := 0; i < len(seed_range_splits) - 1; i++ {
+					if seed_range_splits[i].SeedStart + seed_range_splits[i].SeedRange < seed_range_splits[i + 1].SeedStart {
+						missing_seed_range_splits = append(missing_seed_range_splits, AlmanacSeed{
+							SeedStart: seed_range_splits[i].SeedStart + seed_range_splits[i].SeedRange,
+							SeedRange: seed_range_splits[i + 1].SeedStart - (seed_range_splits[i].SeedStart + seed_range_splits[i].SeedRange),
+						})
+					}
+				}
+
+				seed_range_splits = append(seed_range_splits, missing_seed_range_splits...)
+			}
+
+			seed_ranges_to_be_mapped = append(seed_ranges_to_be_mapped, seed_range_splits...)
 		}
 
-		for _, mapped_seed_range := range mapped_seed_ranges {
-			missing_seed_ranges := []AlmanacSeed{mapped_seed_range}
-			for {
-				// fmt.Println("here 1", processed_mapped_seed_ranges, missing_seed_ranges)
+		// Map the seed ranges
+		for _, seed_range := range seed_ranges_to_be_mapped {
+			mapped := false
+			for _, map_item := range curr_map {
+				overlapping_start := max(seed_range.SeedStart, map_item.SourceRangeStart)
+				overlapping_range := min(seed_range.SeedStart + seed_range.SeedRange, map_item.SourceRangeStart + map_item.RangeLength) - max(seed_range.SeedStart, map_item.SourceRangeStart)
 
-				if len(missing_seed_ranges) == 0 {
-					break
+				if overlapping_range <= 0 {
+					continue
 				}
 
-				if len(processed_mapped_seed_ranges) == 0 {
-					new_mapped_seed_ranges = append(new_mapped_seed_ranges, missing_seed_ranges...)
-					break
-				}
+				new_mapped_seed_ranges = append(new_mapped_seed_ranges, AlmanacSeed{
+					SeedStart: map_item.DestinationRangeStart + (overlapping_start - map_item.SourceRangeStart),
+					SeedRange: overlapping_range,
+				})
 
-				missing_seed_range := missing_seed_ranges[0]
-				found := false
-				for _, processed_mapped_seed_range := range processed_mapped_seed_ranges {
-					if processed_mapped_seed_range.SeedStart >= missing_seed_range.SeedStart + missing_seed_range.SeedRange || missing_seed_range.SeedStart >= processed_mapped_seed_range.SeedStart + processed_mapped_seed_range.SeedRange {
-						// fmt.Println(processed_mapped_seed_range, missing_seed_range, "continue")
-						continue
-					}
-
-					new_missing_seed_ranges := []AlmanacSeed{}
-
-					// Missing range before
-					new_missing_seed_range_before := min(missing_seed_range.SeedStart + missing_seed_range.SeedRange, processed_mapped_seed_range.SeedStart) - max(missing_seed_range.SeedStart, processed_mapped_seed_range.SeedStart)
-					// fmt.Println("new_missing_seed_range_before", new_missing_seed_range_before)
-					if new_missing_seed_range_before > 0 {
-						new_missing_seed_ranges = append(new_missing_seed_ranges, AlmanacSeed{
-							SeedStart: min(missing_seed_range.SeedStart, processed_mapped_seed_range.SeedStart),
-							SeedRange: new_missing_seed_range_before,
-						})
-					}
-
-					// Missing range after
-					new_missing_seed_range_after := max(missing_seed_range.SeedStart + missing_seed_range.SeedRange, processed_mapped_seed_range.SeedStart + processed_mapped_seed_range.SeedRange) - min(missing_seed_range.SeedStart + missing_seed_range.SeedRange, processed_mapped_seed_range.SeedStart + processed_mapped_seed_range.SeedRange)
-					// fmt.Println("new_missing_seed_range_after", new_missing_seed_range_after)
-					if new_missing_seed_range_after > 0 {
-						new_missing_seed_ranges = append(new_missing_seed_ranges, AlmanacSeed{
-							SeedStart: missing_seed_range.SeedStart + processed_mapped_seed_range.SeedRange,
-							SeedRange: new_missing_seed_range_after,
-						})
-					}
-
-					missing_seed_ranges = missing_seed_ranges[1:]
-					missing_seed_ranges = append(missing_seed_ranges, new_missing_seed_ranges...)
-
-					found = true
-					break
-				}
-
-				if !found {
-					found := false
-					for _, map_item := range curr_map {
-						if missing_seed_range.SeedStart < map_item.SourceRangeStart || missing_seed_range.SeedStart >= map_item.SourceRangeStart + map_item.RangeLength {
-							continue
-						}
-
-						range_length := min(missing_seed_range.SeedRange, map_item.SourceRangeStart + map_item.RangeLength - missing_seed_range.SeedStart)
-						offset := map_item.DestinationRangeStart - map_item.SourceRangeStart
-						new_mapped_seed_ranges = append(new_mapped_seed_ranges, AlmanacSeed{
-							SeedStart: missing_seed_range.SeedStart + offset,
-							SeedRange: range_length,
-						})
-						processed_mapped_seed_ranges = append(processed_mapped_seed_ranges, AlmanacSeed{
-							SeedStart: missing_seed_range.SeedStart,
-							SeedRange: range_length,
-						})
-
-						found = true
-						break
-					}
-
-					if !found {
-						new_mapped_seed_ranges = append(new_mapped_seed_ranges, missing_seed_range)
-					}
-					missing_seed_ranges = missing_seed_ranges[1:]
-				}
+				mapped = true
+				break
 			}
 
-			// fmt.Println("here 2", processed_mapped_seed_ranges, missing_seed_ranges, new_mapped_seed_ranges)
+			if !mapped {
+				new_mapped_seed_ranges = append(new_mapped_seed_ranges, seed_range)
+			}
 		}
 
 		mapped_seed_ranges = new_mapped_seed_ranges
-
-		if counter++; counter == 5 {
-			// break
-		}
 	}
 
 	lowest_destination := 1000000000000000000
